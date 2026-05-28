@@ -26,7 +26,7 @@ npx tauri build --no-bundle
 
 ## GitHub Actions リリース
 
-1. 変更を `master` ブランチへ反映します。
+1. 変更を `main` ブランチへ反映します。
 2. リリース対象コミットに `v1.0.0` のようなタグを付けて push します。
 3. `.github\workflows\release.yml` が Windows 用 portable ビルドを実行します。
 4. GitHub Release に `MyAlbum-v1.0.0-windows-x64-portable.zip` を添付します。
