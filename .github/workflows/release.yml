@@ -57,7 +57,8 @@ jobs:
           $expected = "${{ steps.release_meta.outputs.version }}"
           $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $tauriVersion = (Get-Content src-tauri\tauri.conf.json -Raw | ConvertFrom-Json).version
-          $cargoVersion = ([regex]::Match((Get-Content src-tauri\Cargo.toml -Raw), '(?m)^version = "([^"]+)"$')).Groups[1].Value
+          $cargoVersionMatch = Get-Content src-tauri\Cargo.toml | Select-String -Pattern '^version = "([^"]+)"$' | Select-Object -First 1
+          $cargoVersion = $cargoVersionMatch.Matches[0].Groups[1].Value
 
           foreach ($item in @(
             @{ Name = "package.json"; Version = $packageVersion },
