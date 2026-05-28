@@ -1,0 +1,129 @@
+name: Release Windows Portable
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing git tag to release (example: v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Resolve release tag
+        id: release_meta
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}"
+          } else {
+            $tag = "${{ github.ref_name }}"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw "Release tag could not be resolved."
+          }
+
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Release tag must match v<major>.<minor>.<patch>."
+          }
+
+          $version = $tag.Substring(1)
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Verify version files
+        shell: pwsh
+        run: |
+          $expected = "${{ steps.release_meta.outputs.version }}"
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri\tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoVersion = ([regex]::Match((Get-Content src-tauri\Cargo.toml -Raw), '(?m)^version = "([^"]+)"$')).Groups[1].Value
+
+          foreach ($item in @(
+            @{ Name = "package.json"; Version = $packageVersion },
+            @{ Name = "src-tauri/tauri.conf.json"; Version = $tauriVersion },
+            @{ Name = "src-tauri/Cargo.toml"; Version = $cargoVersion }
+          )) {
+            if ($item.Version -ne $expected) {
+              throw "$($item.Name) version '$($item.Version)' does not match tag version '$expected'."
+            }
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build portable executable
+        run: npx tauri build --no-bundle
+
+      - name: Create portable ZIP
+        id: package_asset
+        shell: pwsh
+        run: |
+          $exePath = "src-tauri\target\release\myalbum.exe"
+          if (-not (Test-Path $exePath)) {
+            throw "Built executable not found: $exePath"
+          }
+
+          $assetDir = "release-assets"
+          $assetName = "MyAlbum-${{ steps.release_meta.outputs.tag }}-windows-x64-portable.zip"
+          $assetPath = Join-Path $assetDir $assetName
+
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+          if (Test-Path $assetPath) {
+            Remove-Item $assetPath -Force
+          }
+
+          Compress-Archive -Path $exePath -DestinationPath $assetPath -CompressionLevel Optimal
+
+          "asset_path=$assetPath" >> $env:GITHUB_OUTPUT
+          "asset_name=$assetName" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          name: MyAlbum ${{ steps.release_meta.outputs.tag }}
+          files: ${{ steps.package_asset.outputs.asset_path }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Windows portable build.
+
+            - ZIP root contains `myalbum.exe`
+            - No installer is included
+            - Microsoft WebView2 Runtime is required

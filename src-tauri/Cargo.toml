@@ -1,6 +1,6 @@
 [package]
 name = "myalbum"
-version = "0.1.0"
+version = "1.0.0"
 description = "画像フォルダからEPUB電子書籍を生成するデスクトップアプリ"
 authors = ["KINGkawamura"]
 edition = "2021"
